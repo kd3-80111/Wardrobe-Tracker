@@ -1,0 +1,1 @@
+<template><div class="empty-state"><p class="eyebrow">404</p><h1>Page not found</h1><p>The page you requested does not exist.</p><RouterLink class="button primary" to="/">Go home</RouterLink></div></template>
