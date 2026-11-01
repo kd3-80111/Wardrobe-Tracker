@@ -32,7 +32,7 @@ pnpm install
 pnpm dev
 ```
 
-Open the local URL printed by Vite. The app seeds its initial sample wardrobe only once in a new browser database.
+Open the local URL printed by Vite. A new browser database starts with four realistic example items—one per category—so every feature can be explored immediately.
 
 ## Commands
 
@@ -49,9 +49,9 @@ Records and compressed photographs are stored locally in IndexedDB on the curren
 
 Clearing browser/site storage can remove wardrobe data. Back up before changing or clearing browser storage. Data is local to each browser/device, there is no automatic phone-to-PC synchronization, and backups should be exported regularly.
 
-## Initial inventory note
+## Example data
 
-The detailed inventory lines produce 80 individual records. An earlier summary said 78; the detailed category lines are treated as authoritative. Initial pieces are editable placeholders. The printed T-shirt preference includes a note for later review because the source inventory also mentioned dislike.
+The repository contains only four generic example items: a white cotton T-shirt, navy denim jacket, grey crewneck sweater, and blue straight-leg jeans. They contain no personal information and can be edited or deleted through the normal wardrobe controls. An untouched legacy 80-item demo database is safely replaced on its next load; customized wardrobes are left unchanged.
 
 ## PWA installation
 

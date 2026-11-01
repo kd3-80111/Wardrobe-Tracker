@@ -1,7 +1,8 @@
 {
   "name": "wardrobe-tracker",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "A private, offline-first wardrobe tracker built with Vue 3.",
   "type": "module",
   "scripts": {
     "dev": "vite",

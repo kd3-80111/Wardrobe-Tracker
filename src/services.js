@@ -1,10 +1,34 @@
-import {db,uid} from './database/wardrobeDb'
+import {db} from './database/wardrobeDb'
 import {DEFAULT_USAGES} from './data/options'
-const categoriesSeed=[['Tops','#d88b75','👕'],['Layers','#778b7c','🧥'],['Knitwear & Sweatshirts','#b18a58','👚'],['Bottomwear','#7184a3','👖']]
-const rows=[]; const add=(group,label,preference,n=1,status='regular',note='')=>{const start=rows.filter(r=>r.group===group&&r.label===label).length;for(let i=1;i<=n;i++) rows.push({name:`${label} ${start+i}`,group,label,preference,status,note})}
-add('Tops','Formal Shirt','neutral',6);add('Tops','Casual Shirt','neutral',4);add('Tops','Casual Shirt','dislike',5);add('Tops','Overshirt','like');add('Tops','Overshirt','dislike');add('Tops','Plain T-shirt','like',5);add('Tops','Plain T-shirt','dislike',2);add('Tops','Printed T-shirt','like',1,'regular','Source preference requires review; source also mentioned dislike.');add('Tops','Full Sleeve T-shirt','like',3);add('Tops','Full Sleeve T-shirt','dislike',2);add('Tops','Full Sleeve Henley','neutral',3);add('Tops','Polo T-shirt','like',9);add('Tops','Polo T-shirt','dislike');add('Tops','Polo T-shirt','like',2,'formal-only');add('Tops','Casual Polo T-shirt','neutral',2);add('Tops','Hoodie T-shirt','neutral',2);add('Tops','Hoodie T-shirt','neutral',1,'cannot-wear-outside');add('Layers','Jacket','neutral',3);add('Knitwear & Sweatshirts','Pullover Sweater','neutral');add('Knitwear & Sweatshirts','Standalone Sweater','neutral');add('Knitwear & Sweatshirts','Zippered Sweatshirt','dislike');add('Knitwear & Sweatshirts','Zippered Sweatshirt','neutral',3);add('Knitwear & Sweatshirts','Non-Zippered Sweatshirt','neutral',3);add('Knitwear & Sweatshirts','Non-Zippered Sweatshirt','neutral',2,'cannot-wear-outside');add('Bottomwear','Jeans','love',4);add('Bottomwear','Jeans','like',3);add('Bottomwear','Jeans','dislike');add('Bottomwear','Chinos','love');add('Bottomwear','Chinos','like');add('Bottomwear','Chinos','neutral',1,'cannot-wear-outside');add('Bottomwear','Formal Pants','love',4);add('Bottomwear','Formal Pants','dislike')
+const DEMO_SEED_VERSION=2
+const categoriesSeed=[
+  {id:'demo-category-tops',name:'Tops',description:'T-shirts, shirts, and other everyday tops.',color:'#d88b75',icon:'👕'},
+  {id:'demo-category-layers',name:'Layers',description:'Jackets and lightweight outer layers.',color:'#778b7c',icon:'🧥'},
+  {id:'demo-category-knitwear',name:'Knitwear & Sweatshirts',description:'Sweaters, hoodies, and sweatshirts.',color:'#b18a58',icon:'👚'},
+  {id:'demo-category-bottomwear',name:'Bottomwear',description:'Jeans, trousers, and other bottoms.',color:'#7184a3',icon:'👖'},
+]
+const rows=[
+  {id:'demo-item-white-tshirt',name:'White Cotton T-shirt',categoryId:'demo-category-tops',color:'#f4f1e8',preference:'like',status:'regular',note:'A versatile everyday basic.'},
+  {id:'demo-item-denim-jacket',name:'Navy Denim Jacket',categoryId:'demo-category-layers',color:'#263b57',preference:'love',status:'occasional',note:'A casual layer for cooler evenings.'},
+  {id:'demo-item-grey-sweater',name:'Grey Crewneck Sweater',categoryId:'demo-category-knitwear',color:'#8b8e93',preference:'like',status:'regular',note:'Comfortable mid-weight knitwear.'},
+  {id:'demo-item-blue-jeans',name:'Blue Straight-Leg Jeans',categoryId:'demo-category-bottomwear',color:'#3f6385',preference:'love',status:'regular',note:'Reliable everyday denim.'},
+]
 export const seedRecordCount=rows.length
-export async function seed(){if(await db.settings.get('seeded'))return;const now=new Date().toISOString();await db.transaction('rw',db.categories,db.clothing,db.settings,async()=>{for(let i=0;i<categoriesSeed.length;i++){const [name,color,icon]=categoriesSeed[i];await db.categories.put({id:uid(),name,description:'',color,icon,sortOrder:i,createdAt:now,updatedAt:now})}const cats=await db.categories.toArray();for(const r of rows){const cat=cats.find(c=>c.name===r.group);await db.clothing.add({id:uid(),name:r.name,categoryId:cat.id,categoryIds:[cat.id],color:'#789584',preference:r.preference,usageStatus:r.status,quantity:1,notes:r.note,purchaseDate:'',photo:'',photoType:'',markedForDisposal:false,disposalReason:'',createdAt:now,updatedAt:now})}await db.settings.put({key:'seeded',value:true});await db.settings.put({key:'seedVersion',value:1})})}
+export async function seed(){
+  const seeded=Boolean((await db.settings.get('seeded'))?.value)
+  const version=Number((await db.settings.get('seedVersion'))?.value||0)
+  if(seeded&&version>=DEMO_SEED_VERSION)return
+  const replaceLegacyDemo=!!seeded&&version<=1&&(await db.clothing.count())===80
+  if(seeded&&!replaceLegacyDemo)return
+  const now=new Date().toISOString()
+  await db.transaction('rw',db.categories,db.clothing,db.settings,async()=>{
+    if(replaceLegacyDemo){await db.clothing.clear();await db.categories.clear()}
+    await db.categories.bulkPut(categoriesSeed.map((category,sortOrder)=>({...category,sortOrder,createdAt:now,updatedAt:now})))
+    await db.clothing.bulkPut(rows.map(item=>({id:item.id,name:item.name,categoryId:item.categoryId,categoryIds:[item.categoryId],color:item.color,preference:item.preference,usageStatus:item.status,quantity:1,notes:item.note,purchaseDate:'',photo:'',photoType:'',markedForDisposal:false,disposalReason:'',createdAt:now,updatedAt:now})))
+    await db.settings.put({key:'seeded',value:true})
+    await db.settings.put({key:'seedVersion',value:DEMO_SEED_VERSION})
+  })
+}
 export async function seedUsages(){if(await db.usages.count())return;const now=new Date().toISOString();await db.usages.bulkPut(DEFAULT_USAGES.map((usage,sortOrder)=>({...usage,sortOrder,description:'',createdAt:now,updatedAt:now})))}
 export async function photoData(file){if(!file.type.startsWith('image/'))throw Error('Choose an image file.');return new Promise((resolve,reject)=>{const img=new Image(),url=URL.createObjectURL(file);img.onload=()=>{const scale=Math.min(1,1280/Math.max(img.width,img.height)),c=document.createElement('canvas');c.width=Math.round(img.width*scale);c.height=Math.round(img.height*scale);c.getContext('2d').drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(url);const finish=blob=>{if(!blob)return reject(Error('This image could not be processed.'));const rd=new FileReader();rd.onload=()=>resolve({photo:rd.result,photoType:blob.type});rd.onerror=()=>reject(Error('Could not read image.'));rd.readAsDataURL(blob)};c.toBlob(blob=>blob?.type==='image/webp'?finish(blob):c.toBlob(finish,'image/jpeg',.84),'image/webp',.82)};img.onerror=()=>{URL.revokeObjectURL(url);reject(Error('This image could not be opened.'))};img.src=url})}
 export function backupPayload(categories,clothing,settings,usages=[]){return {app:'my-wardrobe',applicationVersion:'1.0.0',schemaVersion:3,exportDate:new Date().toISOString(),categories,clothing,settings,usages}}
