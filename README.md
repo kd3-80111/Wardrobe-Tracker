@@ -11,6 +11,7 @@ A mobile-first personal wardrobe tracker. Your clothing records and photos stay 
 - Complete usage CRUD with custom icons, colours, reordering, and safe item reassignment
 - Preset/custom item colours and emoji preference selection with quick preference updates on cards
 - Search, sorting, category, usage, preference, and rehoming filters in the Wardrobe page
+- Select individual items or all visible filtered items to bulk-change preference, category, or usage, or delete them
 - Compact live wardrobe totals on Home
 - IndexedDB persistence through Dexie with schema migrations and one-time editable inventory seeding
 - JSON backup and restore with photographs, merge or confirmed replace

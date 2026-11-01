@@ -64,6 +64,30 @@ export const useWardrobeStore = defineStore('wardrobe', {
       await this.load()
       this.notify(marked ? 'Moved to rehome list' : 'Removed from rehome list')
     },
+    async bulkUpdateClothing(ids, changes) {
+      if (!ids.length) return
+      const now = new Date().toISOString()
+      await db.transaction('rw', db.clothing, async () => {
+        for (const id of ids) {
+          const update = { updatedAt: now }
+          if (changes.preference) update.preference = changes.preference
+          if (changes.usageStatus) update.usageStatus = changes.usageStatus
+          if (changes.categoryId) {
+            update.categoryIds = [changes.categoryId]
+            update.categoryId = changes.categoryId
+          }
+          await db.clothing.update(id, update)
+        }
+      })
+      await this.load()
+      this.notify(`${ids.length} item${ids.length === 1 ? '' : 's'} updated`)
+    },
+    async bulkDeleteClothing(ids) {
+      if (!ids.length) return
+      await db.clothing.bulkDelete(ids)
+      await this.load()
+      this.notify(`${ids.length} item${ids.length === 1 ? '' : 's'} deleted`)
+    },
     async saveCategory(values, existingId = null) {
       const normalized = values.name.trim().toLocaleLowerCase()
       if (this.categories.some((category) => category.id !== existingId && category.name.trim().toLocaleLowerCase() === normalized)) throw new Error('A category with that name already exists.')
