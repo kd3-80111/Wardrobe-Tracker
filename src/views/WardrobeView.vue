@@ -4,36 +4,34 @@ import { useRoute, useRouter } from 'vue-router'
 import { useWardrobeStore } from '../stores/wardrobe'
 import { visibleClothes } from '../services'
 import ClothingCard from '../components/ClothingCard.vue'
-import { PREFERENCES } from '../data/options'
+import { PREFERENCES, SEASONS, OCCASIONS } from '../data/options'
+import { wardrobeFilters } from '../composables/wardrobeFilters'
 
 const store = useWardrobeStore()
 const route = useRoute()
 const router = useRouter()
-const filters = reactive({ search: '', category: '', preference: '', usage: '', disposal: '', sort: 'updated' })
+const filters = wardrobeFilters
+const showMoreFilters = ref(false)
 const selecting = ref(false)
 const selectedIds = ref(new Set())
 const bulk = reactive({ preference: '', categoryId: '', usageStatus: '' })
 
 watch(() => route.query, (query) => {
-  filters.preference = query.preference || ''
-  filters.usage = query.usage || ''
-  filters.disposal = query.disposal || ''
+  for (const key of ['preference', 'usage', 'disposal']) if (query[key]) filters[key] = query[key]
 }, { immediate: true })
 
 const items = computed(() => visibleClothes(store.clothes.map((item) => ({
   ...item,
   categoryName: store.categoriesFor(item).map((category) => category.name).join(' '),
-})), filters))
-const hasFilters = computed(() => filters.search || filters.category || filters.preference || filters.usage || filters.disposal)
+})), filters).filter((item) => (!filters.main || store.categoryById(item.categoryId)?.parentId === filters.main) && (!filters.season || item.seasons?.includes(filters.season) || item.seasons?.includes('All seasons')) && (!filters.occasion || item.occasions?.includes(filters.occasion))))
+const hasFilters = computed(() => filters.search || filters.main || filters.category || filters.preference || filters.usage || filters.disposal || filters.season || filters.occasion)
+const extraFilterCount = computed(() => [filters.preference, filters.usage, filters.disposal, filters.season, filters.occasion, filters.sort !== 'updated'].filter(Boolean).length)
 const selectedCount = computed(() => selectedIds.value.size)
 const allVisibleSelected = computed(() => items.value.length > 0 && items.value.every((item) => selectedIds.value.has(item.id)))
 
 function clearFilters() {
-  Object.assign(filters, { search: '', category: '', preference: '', usage: '', disposal: '', sort: 'updated' })
+  Object.assign(filters, { search: '', main: '', category: '', preference: '', usage: '', disposal: '', season: '', occasion: '', sort: 'updated' })
   router.replace('/wardrobe')
-}
-async function remove(item) {
-  if (window.confirm(`Delete “${item.name}” permanently?`)) await store.deleteClothing(item.id)
 }
 function startSelection() { selecting.value = true; selectedIds.value = new Set() }
 function finishSelection() { selecting.value = false; selectedIds.value = new Set(); Object.assign(bulk, { preference: '', categoryId: '', usageStatus: '' }) }
@@ -70,14 +68,23 @@ async function deleteSelected() {
 
   <section class="filter-panel" aria-label="Search and filters">
     <label class="search-field"><span aria-hidden="true">⌕</span><input v-model="filters.search" type="search" placeholder="Search items" aria-label="Search wardrobe" /></label>
-    <div class="filter-row">
-      <select v-model="filters.category" aria-label="Filter by category"><option value="">All categories</option><option v-for="category in store.categories" :key="category.id" :value="category.id">{{ category.name }}</option></select>
-      <select v-model="filters.preference" aria-label="Filter by preference"><option value="">Any preference</option><option value="love">Love</option><option value="like">Like</option><option value="neutral">Neutral</option><option value="dislike">Dislike</option><option value="hate">Hate</option></select>
+    <div class="filter-primary">
+      <button class="button secondary" type="button" :aria-expanded="showMoreFilters" aria-controls="more-filters" @click="showMoreFilters = !showMoreFilters">Filters{{ extraFilterCount ? ` (${extraFilterCount})` : '' }}</button>
+      <button v-if="hasFilters" class="button ghost" type="button" @click="clearFilters">Clear</button>
+    </div>
+    <div v-if="showMoreFilters" id="more-filters" class="filter-row">
+      <select v-model="filters.preference" aria-label="Filter by rating"><option value="">Any rating</option><option value="love">Love it</option><option value="like">Like it</option><option value="neutral">Neutral</option><option value="dislike">Dislike it</option><option value="hate">Hate it</option></select>
       <select v-model="filters.usage" aria-label="Filter by usage"><option value="">Any usage</option><option v-for="usage in store.usages" :key="usage.id" :value="usage.id">{{ usage.icon }} {{ usage.name }}</option></select>
       <select v-model="filters.disposal" aria-label="Filter by rehome status"><option value="">Any status</option><option value="no">Keeping</option><option value="yes">To rehome</option></select>
+      <select v-model="filters.season" aria-label="Filter by season"><option value="">Any season</option><option v-for="season in SEASONS.slice(1)" :key="season">{{ season }}</option></select>
+      <select v-model="filters.occasion" aria-label="Filter by occasion"><option value="">Any occasion</option><option v-for="occasion in OCCASIONS" :key="occasion">{{ occasion }}</option></select>
       <select v-model="filters.sort" aria-label="Sort wardrobe"><option value="updated">Recently updated</option><option value="added">Recently added</option><option value="name">Name</option><option value="category">Category</option><option value="preference">Preference</option></select>
-      <button v-if="hasFilters" class="button ghost" @click="clearFilters">Clear</button>
     </div>
+  </section>
+
+  <section class="browse-groups" aria-label="Browse categories">
+    <div class="category-chips"><button type="button" :class="{active:!filters.main}" @click="filters.main='';filters.category=''">All items</button><button v-for="main in store.mainCategories" :key="main.id" type="button" :class="{active:filters.main===main.id}" @click="filters.main=main.id;filters.category=''">{{ main.icon }} {{ main.name }} <small>{{ store.mainCategoryCount(main.id) }}</small></button></div>
+    <div v-if="filters.main" class="subcategory-chips"><button type="button" :class="{active:!filters.category}" @click="filters.category=''">All {{ store.mainCategories.find((entry)=>entry.id===filters.main)?.name }}</button><button v-for="sub in store.categories.filter((entry)=>entry.parentId===filters.main)" :key="sub.id" type="button" :class="{active:filters.category===sub.id}" @click="filters.category=sub.id">{{ sub.icon }} {{ sub.name }} <small>{{ store.categoryCount(sub.id) }}</small></button></div>
   </section>
 
   <section v-if="selecting" class="bulk-panel" aria-label="Bulk item actions">
@@ -97,7 +104,7 @@ async function deleteSelected() {
   <div v-if="store.loading && !store.initialized" class="loading-card">Loading items…</div>
   <div v-else-if="items.length" class="card-list">
     <ClothingCard v-for="item in items" :key="item.id" :item="item" :categories="store.categoriesFor(item)" :usage="store.usageById(item.usageStatus)" :selection-mode="selecting" :selected="selectedIds.has(item.id)"
-      @select="toggleSelected(item.id)" @view="router.push(`/clothing/${item.id}`)" @edit="router.push(`/clothing/${item.id}/edit`)" @delete="remove(item)" @preference="store.setPreference(item.id,$event)" />
+      @select="toggleSelected(item.id)" @view="router.push(`/clothing/${item.id}`)" />
   </div>
   <div v-else class="empty-state"><h2>No items found</h2><p>{{ hasFilters ? 'Try clearing a filter.' : 'Add your first wardrobe item.' }}</p><button v-if="hasFilters" class="button secondary" @click="clearFilters">Clear filters</button><RouterLink v-else class="button primary" to="/clothing/add">Add item</RouterLink></div>
 </template>

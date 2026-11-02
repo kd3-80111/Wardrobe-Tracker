@@ -13,7 +13,7 @@ const error = ref('')
 
 async function exportBackup() {
   error.value = ''
-  const payload = backupPayload(store.categories, store.clothes, await db.settings.toArray(), store.usages)
+  const payload = backupPayload(store.categories, store.clothes, await db.settings.toArray(), store.usages, store.mainCategories, store.customColors)
   const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }))
   const link = document.createElement('a')
   link.href = url
@@ -30,16 +30,19 @@ async function restoreBackup() {
   try {
     const backup = JSON.parse(await importFile.value.text())
     if (!validateBackup(backup)) throw new Error('This is not a valid My Wardrobe backup.')
+    if (backup.schemaVersion < 4) throw new Error('This is an older backup. Its category mapping needs to be reviewed before restoring into the new wardrobe.')
     const replacing = importMode.value === 'replace'
     if (!window.confirm(`${replacing ? 'Replace your current wardrobe with' : 'Merge'} ${backup.clothing.length} items and ${backup.categories.length} categories?`)) return
-    await db.transaction('rw', db.categories, db.clothing, db.settings, db.usages, async () => {
-      if (replacing) { await db.categories.clear(); await db.clothing.clear(); await db.settings.clear(); await db.usages.clear() }
+    await db.transaction('rw', db.categories, db.clothing, db.settings, db.usages, db.mainCategories, db.customColors, async () => {
+      if (replacing) { await db.categories.clear(); await db.clothing.clear(); await db.settings.clear(); await db.usages.clear(); await db.mainCategories.clear(); await db.customColors.clear() }
       const categories = mergeById(replacing ? [] : await db.categories.toArray(), backup.categories)
       const clothes = mergeById(replacing ? [] : await db.clothing.toArray(), backup.clothing)
       await db.categories.bulkPut(categories)
-      await db.clothing.bulkPut(clothes.map((item) => { const categoryIds=item.categoryIds?.length?item.categoryIds:item.categoryId?[item.categoryId]:[];return {...item,categoryIds,categoryId:categoryIds[0]||'',quantity:Math.max(1,Number(item.quantity)||1)} }))
+      await db.clothing.bulkPut(clothes)
       await db.settings.bulkPut(backup.settings)
       if (backup.usages?.length) await db.usages.bulkPut(backup.usages)
+      if (backup.mainCategories?.length) await db.mainCategories.bulkPut(backup.mainCategories)
+      if (backup.customColors?.length) await db.customColors.bulkPut(backup.customColors)
     })
     await store.load()
     const restoredTheme = backup.settings.find((setting) => setting.key === 'theme')?.value

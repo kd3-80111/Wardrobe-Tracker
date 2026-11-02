@@ -4,17 +4,18 @@ A mobile-first personal wardrobe tracker. Your clothing records and photos stay 
 
 ## Features
 
-- Five focused destinations: Home, Wardrobe, Add, Categories, and Settings
-- Complete clothing CRUD with visible View, Edit, and Delete actions
-- Items can belong to multiple categories; category icons provide image-free item placeholders
-- Complete category CRUD with an icon picker, colour distribution bars, reordering, and safe deletion
-- Complete usage CRUD with custom icons, colours, reordering, and safe item reassignment
-- Preset/custom item colours and emoji preference selection with quick preference updates on cards
-- Search, sorting, category, usage, preference, and rehoming filters in the Wardrobe page
-- Select individual items or all visible filtered items to bulk-change preference, category, or usage, or delete them
+- Wardrobe-first navigation with quick access to Add and Home; Settings is in the header, and Organize is reachable from Home
+- Complete clothing CRUD with a streamlined item card and detail actions
+- Each item has one subcategory under an editable main category; category icons provide image-free placeholders
+- Main category, subcategory, and wear-status editing with safe item reassignment on deletion
+- Preset colours, reusable named custom colours, and five-level item ratings
+- Seasons, occasions, product links, gallery/camera photos, and a best-effort product image lookup
+- Lifetime and since-wash wear counts with wear, undo, wash, and reset actions
+- Search, category browsing, and persistent filters for rating, usage, season, occasion, and rehoming
+- Select individual items or all visible filtered items to bulk-change rating, subcategory, or usage, or delete them
 - Compact live wardrobe totals on Home
 - IndexedDB persistence through Dexie with schema migrations and one-time editable inventory seeding
-- JSON backup and restore with photographs, merge or confirmed replace
+- Version 4 JSON backup and restore with the category hierarchy, custom colours, and photographs
 - Installable PWA with an offline application shell, update prompt, and online status
 - Responsive layout for phones and desktop
 - Dark-first appearance with a persistent light-mode alternative
@@ -32,7 +33,7 @@ pnpm install
 pnpm dev
 ```
 
-Open the local URL printed by Vite. A new browser database starts with four realistic example items—one per category—so every feature can be explored immediately.
+Open the local URL printed by Vite. A new browser database starts with four example items and an editable category hierarchy.
 
 ## Commands
 
@@ -45,7 +46,7 @@ pnpm preview   # preview the production build
 
 ## Data, privacy, and backups
 
-Records and compressed photographs are stored locally in IndexedDB on the current browser and device. Nothing is synchronized or uploaded. Use **Settings → Download backup** regularly; the JSON file includes clothing, categories, usages, settings, and photo data. Restore accepts a valid My Wardrobe JSON backup and offers merge or replace. Merge uses record IDs to update existing entries instead of duplicating them. Replace requires confirmation.
+Records and compressed photographs are stored locally in IndexedDB on the current browser and device. Nothing is synchronized or uploaded. Use **Settings → Download backup** regularly; the JSON file includes clothing, both category levels, usages, custom colours, settings, and photos. Version 4 backups support merge or confirmed replace. Older backups require a reviewed category mapping before restore and are currently rejected by the new restore screen.
 
 Clearing browser/site storage can remove wardrobe data. Back up before changing or clearing browser storage. Data is local to each browser/device, there is no automatic phone-to-PC synchronization, and backups should be exported regularly.
 

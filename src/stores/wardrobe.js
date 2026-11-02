@@ -1,17 +1,15 @@
 import { defineStore } from 'pinia'
 import { db, uid } from '../database/wardrobeDb'
-import { seed, seedUsages } from '../services'
+import { seed, seedUsages, seedTaxonomy } from '../services'
 
 export const useWardrobeStore = defineStore('wardrobe', {
-  state: () => ({ clothes: [], categories: [], usages: [], loading: false, initialized: false, error: '', toast: '' }),
+  state: () => ({ clothes: [], categories: [], mainCategories: [], customColors: [], usages: [], loading: false, initialized: false, error: '', toast: '' }),
   getters: {
     clothingById: (state) => (id) => state.clothes.find((item) => item.id === id),
     categoryById: (state) => (id) => state.categories.find((category) => category.id === id),
-    categoriesFor: (state) => (item) => {
-      const ids = item?.categoryIds?.length ? item.categoryIds : item?.categoryId ? [item.categoryId] : []
-      return ids.map((id) => state.categories.find((category) => category.id === id)).filter(Boolean)
-    },
-    categoryCount: (state) => (id) => state.clothes.filter((item) => (item.categoryIds?.length ? item.categoryIds : [item.categoryId]).includes(id)).length,
+    categoriesFor: (state) => (item) => state.categories.filter((category) => category.id === item?.categoryId),
+    categoryCount: (state) => (id) => state.clothes.filter((item) => item.categoryId === id).length,
+    mainCategoryCount: (state) => (id) => state.clothes.filter((item) => state.categories.some((category) => category.id === item.categoryId && category.parentId === id)).length,
     usageById: (state) => (id) => state.usages.find((usage) => usage.id === id),
     usageCount: (state) => (id) => state.clothes.filter((item) => item.usageStatus === id).length,
   },
@@ -23,12 +21,15 @@ export const useWardrobeStore = defineStore('wardrobe', {
       try {
         await seed()
         await seedUsages()
-        const [clothes, categories, usages] = await Promise.all([
-          db.clothing.toArray(), db.categories.orderBy('sortOrder').toArray(), db.usages.orderBy('sortOrder').toArray(),
+        await seedTaxonomy()
+        const [clothes, categories, usages, mainCategories, customColors] = await Promise.all([
+          db.clothing.toArray(), db.categories.orderBy('sortOrder').toArray(), db.usages.orderBy('sortOrder').toArray(), db.mainCategories.orderBy('sortOrder').toArray(), db.customColors.toArray(),
         ])
         this.clothes = clothes
         this.categories = categories
         this.usages = usages
+        this.mainCategories = mainCategories
+        this.customColors = customColors
         this.initialized = true
       } catch (error) {
         this.error = 'Your local wardrobe could not be opened. Check this browser’s storage permissions.'
@@ -42,12 +43,12 @@ export const useWardrobeStore = defineStore('wardrobe', {
     async saveClothing(values, existingId = null) {
       const now = new Date().toISOString()
       const existing = existingId ? await db.clothing.get(existingId) : null
-      const categoryIds = [...new Set(values.categoryIds || [])]
       const record = {
-        ...values, categoryIds, categoryId: categoryIds[0] || '', id: existing?.id || uid(), name: values.name.trim(),
+        ...values, id: existing?.id || uid(), name: values.name.trim(),
         quantity: Math.max(1, Number(values.quantity) || 1), createdAt: existing?.createdAt || now, updatedAt: now,
       }
       delete record.subcategory
+      delete record.categoryIds
       await db.clothing.put(record)
       await this.load()
       this.notify(existing ? 'Item updated' : 'Item added')
@@ -57,7 +58,7 @@ export const useWardrobeStore = defineStore('wardrobe', {
     async setPreference(id, preference) {
       await db.clothing.update(id, { preference, updatedAt: new Date().toISOString() })
       await this.load()
-      this.notify('Preference updated')
+      this.notify('Rating updated')
     },
     async setDisposal(id, marked, reason = '') {
       await db.clothing.update(id, { markedForDisposal: marked, disposalReason: marked ? reason : '', updatedAt: new Date().toISOString() })
@@ -73,7 +74,6 @@ export const useWardrobeStore = defineStore('wardrobe', {
           if (changes.preference) update.preference = changes.preference
           if (changes.usageStatus) update.usageStatus = changes.usageStatus
           if (changes.categoryId) {
-            update.categoryIds = [changes.categoryId]
             update.categoryId = changes.categoryId
           }
           await db.clothing.update(id, update)
@@ -90,26 +90,57 @@ export const useWardrobeStore = defineStore('wardrobe', {
     },
     async saveCategory(values, existingId = null) {
       const normalized = values.name.trim().toLocaleLowerCase()
-      if (this.categories.some((category) => category.id !== existingId && category.name.trim().toLocaleLowerCase() === normalized)) throw new Error('A category with that name already exists.')
+      if (this.categories.some((category) => category.id !== existingId && category.parentId === values.parentId && category.name.trim().toLocaleLowerCase() === normalized)) throw new Error('A subcategory with that name already exists.')
       const now = new Date().toISOString()
       const existing = existingId ? await db.categories.get(existingId) : null
-      await db.categories.put({ id: existing?.id || uid(), name: values.name.trim(), description: values.description?.trim() || '', color: values.color || '#789584', icon: values.icon || '◈', sortOrder: existing?.sortOrder ?? this.categories.length, createdAt: existing?.createdAt || now, updatedAt: now })
+      await db.categories.put({ id: existing?.id || uid(), parentId: values.parentId, name: values.name.trim(), description: values.description?.trim() || '', color: values.color || '#789584', icon: values.icon || '◈', sortOrder: existing?.sortOrder ?? this.categories.length, createdAt: existing?.createdAt || now, updatedAt: now })
       await this.load(); this.notify(existing ? 'Category updated' : 'Category added')
     },
     async deleteCategory(id, moveToId = null) {
-      const affected = this.clothes.filter((item) => (item.categoryIds?.length ? item.categoryIds : [item.categoryId]).includes(id))
+      const affected = this.clothes.filter((item) => item.categoryId === id)
       await db.transaction('rw', db.categories, db.clothing, async () => {
         if (affected.length && !moveToId) throw new Error('Choose a category for the affected items.')
         for (const item of affected) {
-          const current = item.categoryIds?.length ? item.categoryIds : [item.categoryId]
-          const categoryIds = [...new Set(current.map((categoryId) => categoryId === id ? moveToId : categoryId).filter(Boolean))]
-          await db.clothing.update(item.id, { categoryIds, categoryId: categoryIds[0] || '', updatedAt: new Date().toISOString() })
+          await db.clothing.update(item.id, { categoryId: moveToId, updatedAt: new Date().toISOString() })
         }
         await db.categories.delete(id)
       })
       await this.load(); this.notify('Category deleted')
     },
     async moveCategory(id, direction) { await this.reorder('categories', this.categories, id, direction) },
+    async saveMainCategory(values, existingId = null) {
+      const name = values.name.trim()
+      if (!name) throw new Error('Name is required.')
+      if (this.mainCategories.some((entry) => entry.id !== existingId && entry.name.toLowerCase() === name.toLowerCase())) throw new Error('Main category already exists.')
+      const now = new Date().toISOString(), existing = existingId ? await db.mainCategories.get(existingId) : null
+      await db.mainCategories.put({ id: existing?.id || uid(), name, icon: values.icon || '◈', sortOrder: existing?.sortOrder ?? this.mainCategories.length, createdAt: existing?.createdAt || now, updatedAt: now })
+      await this.load()
+    },
+    async deleteMainCategory(id, replacementId) {
+      const children = this.categories.filter((entry) => entry.parentId === id)
+      if (children.length && !replacementId) throw new Error('Choose another main category first.')
+      await db.transaction('rw', db.mainCategories, db.categories, async () => {
+        for (const child of children) await db.categories.update(child.id, { parentId: replacementId })
+        await db.mainCategories.delete(id)
+      })
+      await this.load()
+    },
+    async saveCustomColor(name, value) {
+      if (!name.trim()) throw new Error('Name your custom colour.')
+      const existing = this.customColors.find((entry) => entry.name.toLowerCase() === name.trim().toLowerCase())
+      await db.customColors.put({ id: existing?.id || uid(), name: name.trim(), value })
+      await this.load()
+    },
+    async changeWear(id, totalDelta, sinceWashDelta) {
+      await db.transaction('rw', db.clothing, async () => {
+        const item = await db.clothing.get(id)
+        if (!item) return
+        await db.clothing.update(id, { totalWears: Math.max(0, (item.totalWears || 0) + totalDelta), wearsSinceWash: Math.max(0, (item.wearsSinceWash || 0) + sinceWashDelta) })
+      })
+      await this.load()
+    },
+    async washItem(id) { await db.clothing.update(id, { wearsSinceWash: 0 }); await this.load() },
+    async resetWearCount(id) { await db.clothing.update(id, { totalWears: 0, wearsSinceWash: 0 }); await this.load() },
     async saveUsage(values, existingId = null) {
       const normalized = values.name.trim().toLocaleLowerCase()
       if (this.usages.some((usage) => usage.id !== existingId && usage.name.trim().toLocaleLowerCase() === normalized)) throw new Error('A usage with that name already exists.')

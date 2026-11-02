@@ -15,11 +15,9 @@ const updateSW = registerSW({
 })
 
 const navigation = [
-  ['/', '⌂', 'Home'],
   ['/wardrobe', '▦', 'Wardrobe'],
-  ['/clothing/add', '+', 'Add'],
-  ['/categories', '◫', 'Organize'],
-  ['/settings', '⚙', 'Settings'],
+  ['/clothing/add', '+', 'Add item'],
+  ['/home', '⌂', 'Home'],
 ]
 
 onMounted(() => {
@@ -32,12 +30,10 @@ onMounted(() => {
 <template>
   <div class="app-shell">
     <header class="app-header">
-      <RouterLink class="brand" to="/" aria-label="My Wardrobe home">
+      <RouterLink class="brand" to="/wardrobe" aria-label="My Wardrobe">
         <span class="brand-mark">◈</span><span>My Wardrobe</span>
       </RouterLink>
-      <button class="icon-button" :aria-label="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'" @click="toggleTheme">
-        {{ theme === 'dark' ? '☀' : '☾' }}
-      </button>
+      <div class="header-actions"><RouterLink to="/categories">Organize</RouterLink><RouterLink to="/settings">Settings</RouterLink><button class="icon-button" :aria-label="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'" @click="toggleTheme">{{ theme === 'dark' ? '☀' : '☾' }}</button></div>
     </header>
     <div v-if="!online" class="status-banner">Offline · changes are saved on this device</div>
     <div v-if="updateReady" class="status-banner update-banner">An update is ready. <button @click="updateSW(true)">Update now</button></div>
@@ -47,7 +43,7 @@ onMounted(() => {
     </main>
     <nav class="bottom-nav" aria-label="Primary navigation">
       <RouterLink v-for="[path, icon, label] in navigation" :key="path" :to="path"
-        :class="{ active: route.path === path || (path === '/wardrobe' && route.path.startsWith('/clothing/') && route.name !== 'add') }">
+        :class="{ active: route.path === path || (path === '/wardrobe' && route.path.startsWith('/clothing/') && route.name !== 'add') }" :aria-current="route.path === path ? 'page' : undefined">
         <span aria-hidden="true">{{ icon }}</span>{{ label }}
       </RouterLink>
     </nav>

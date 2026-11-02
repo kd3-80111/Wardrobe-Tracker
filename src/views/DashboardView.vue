@@ -13,9 +13,6 @@ const stats = computed(() => ({
   rehome: store.clothes.filter((item) => item.markedForDisposal).length,
 }))
 const recent = computed(() => [...store.clothes].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 3))
-async function remove(item) {
-  if (window.confirm(`Delete “${item.name}” permanently?`)) await store.deleteClothing(item.id)
-}
 </script>
 
 <template>
@@ -37,8 +34,7 @@ async function remove(item) {
       <div class="section-heading"><h2>Recently updated</h2><RouterLink to="/wardrobe">View all</RouterLink></div>
       <div v-if="recent.length" class="card-list compact-list">
         <ClothingCard v-for="item in recent" :key="item.id" :item="item" :categories="store.categoriesFor(item)" :usage="store.usageById(item.usageStatus)"
-          @view="router.push(`/clothing/${item.id}`)" @edit="router.push(`/clothing/${item.id}/edit`)"
-          @delete="remove(item)" @preference="store.setPreference(item.id,$event)" />
+          @view="router.push(`/clothing/${item.id}`)" />
       </div>
       <div v-else class="empty-state"><h2>Your wardrobe is empty</h2><p>Add your first item to get started.</p><RouterLink class="button primary" to="/clothing/add">Add item</RouterLink></div>
     </section>
