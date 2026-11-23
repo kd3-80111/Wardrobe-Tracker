@@ -1,7 +1,7 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 
 const routes = [
-  { path: '/', redirect: '/wardrobe' },
+  { path: '/', redirect: '/home' },
   { path: '/home', name: 'home', component: () => import('../views/DashboardView.vue'), meta: { title: 'Home' } },
   { path: '/wardrobe', name: 'wardrobe', component: () => import('../views/WardrobeView.vue'), meta: { title: 'Wardrobe' } },
   { path: '/clothing/add', name: 'add', component: () => import('../views/ClothingFormView.vue'), meta: { title: 'Add item' } },

@@ -1,5 +1,5 @@
 import {db} from './database/wardrobeDb'
-import {DEFAULT_USAGES, MAIN_CATEGORY_DEFAULTS} from './data/options'
+import {DEFAULT_USAGES, MAIN_CATEGORY_DEFAULTS, PREFERENCES} from './data/options'
 const DEMO_SEED_VERSION=2
 const categoriesSeed=[
   {id:'demo-category-tops',parentId:'tops',name:'T-shirts',description:'T-shirts and everyday tops.',color:'#d88b75',icon:'👕'},
@@ -48,4 +48,27 @@ export function mergeById(existing,incoming){return [...new Map([...existing,...
 export function validateBackup(x){return !!x&&x.app==='my-wardrobe'&&[1,2,3,4].includes(x.schemaVersion)&&Array.isArray(x.categories)&&Array.isArray(x.clothing)&&Array.isArray(x.settings)&&(x.schemaVersion<4||(Array.isArray(x.mainCategories)&&Array.isArray(x.customColors)&&x.categories.every(c=>x.mainCategories.some(main=>main.id===c.parentId))))&&x.categories.every(c=>c.id&&String(c.name||'').trim())&&x.clothing.every(c=>{const ids=Array.isArray(c.categoryIds)&&c.categoryIds.length?c.categoryIds:[c.categoryId];return c.id&&String(c.name||'').trim()&&ids.some(id=>x.categories.some(cat=>cat.id===id))})}
 export function validateClothing(x){const errors={};if(!String(x.name||'').trim())errors.name='Name is required.';if(!x.categoryId)errors.categoryId='Choose a subcategory.';if(!['love','like','neutral','dislike','hate'].includes(x.preference))errors.preference='Choose a rating.';if(!x.usageStatus)errors.usageStatus='Choose a usage.';if(!Number.isInteger(Number(x.quantity))||Number(x.quantity)<1)errors.quantity='Quantity must be at least one.';if(x.markedForDisposal&&!String(x.disposalReason||'').trim())errors.disposalReason='Add a disposal reason.';return errors}
 export function dashboardStats(clothing,categories){return {total:clothing.length,categories:categories.length,loved:clothing.filter(x=>x.preference==='love').length,disposal:clothing.filter(x=>x.markedForDisposal).length,preference:Object.fromEntries(['love','like','neutral','dislike','hate'].map(p=>[p,clothing.filter(x=>x.preference===p).length]))}}
-export function visibleClothes(items,{search='',category='',preference='',usage='',disposal='',sort='updated'}={}){const q=search.toLowerCase();return items.filter(x=>!q||[x.name,x.categoryName,x.color,x.notes].some(v=>String(v||'').toLowerCase().includes(q))).filter(x=>!category||x.categoryId===category).filter(x=>!preference||x.preference===preference).filter(x=>!usage||x.usageStatus===usage).filter(x=>!disposal||(disposal==='yes'?x.markedForDisposal:!x.markedForDisposal)).sort((a,b)=>sort==='name'?a.name.localeCompare(b.name):sort==='category'?String(a.categoryName).localeCompare(String(b.categoryName)):sort==='preference'?a.preference.localeCompare(b.preference):sort==='added'?b.createdAt.localeCompare(a.createdAt):b.updatedAt.localeCompare(a.updatedAt))}
+const PREFERENCE_RANK=Object.fromEntries(PREFERENCES.map((option,index)=>[option.value,index]))
+const preferenceRank=(item)=>PREFERENCE_RANK[item.preference]??PREFERENCES.length
+const byName=(a,b)=>String(a.name).localeCompare(String(b.name))
+const SORTS={
+  name:byName,
+  category:(a,b)=>String(a.categoryName).localeCompare(String(b.categoryName))||byName(a,b),
+  preference:(a,b)=>preferenceRank(a)-preferenceRank(b)||byName(a,b),
+  added:(a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)),
+  worn:(a,b)=>(b.totalWears||0)-(a.totalWears||0)||byName(a,b),
+  // Never-worn items first, then the ones worn longest ago.
+  forgotten:(a,b)=>String(a.lastWornAt||'').localeCompare(String(b.lastWornAt||''))||byName(a,b),
+  updated:(a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)),
+}
+export function visibleClothes(items,{search='',category='',preference='',usage='',disposal='',sort='updated'}={}){
+  const q=search.trim().toLowerCase()
+  const matches=(x)=>[x.name,x.categoryName,x.colorLabel,x.notes,...(x.occasions||[])].some(v=>String(v||'').toLowerCase().includes(q))
+  return items
+    .filter(x=>!q||matches(x))
+    .filter(x=>!category||x.categoryId===category)
+    .filter(x=>!preference||x.preference===preference)
+    .filter(x=>!usage||x.usageStatus===usage)
+    .filter(x=>!disposal||(disposal==='yes'?x.markedForDisposal:!x.markedForDisposal))
+    .sort(SORTS[sort]||SORTS.updated)
+}

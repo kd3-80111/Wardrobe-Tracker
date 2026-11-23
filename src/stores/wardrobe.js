@@ -2,8 +2,15 @@ import { defineStore } from 'pinia'
 import { db, uid } from '../database/wardrobeDb'
 import { seed, seedUsages, seedTaxonomy } from '../services'
 
+// A reload that is already running may have read the database before the latest write,
+// so callers that arrive mid-load wait for it and then trigger exactly one fresh reload.
+let inFlightLoad = null
+let queuedLoad = null
+let toastTimer = null
+let toastHandler = null
+
 export const useWardrobeStore = defineStore('wardrobe', {
-  state: () => ({ clothes: [], categories: [], mainCategories: [], customColors: [], usages: [], loading: false, initialized: false, error: '', toast: '' }),
+  state: () => ({ clothes: [], categories: [], mainCategories: [], customColors: [], usages: [], lastBackup: '', loading: false, initialized: false, error: '', toast: '', toastAction: '' }),
   getters: {
     clothingById: (state) => (id) => state.clothes.find((item) => item.id === id),
     categoryById: (state) => (id) => state.categories.find((category) => category.id === id),
@@ -14,33 +21,55 @@ export const useWardrobeStore = defineStore('wardrobe', {
     usageCount: (state) => (id) => state.clothes.filter((item) => item.usageStatus === id).length,
   },
   actions: {
-    async load() {
-      if (this.loading) return
+    load() {
+      if (inFlightLoad) {
+        queuedLoad ||= inFlightLoad.catch(() => {}).then(() => { queuedLoad = null; return this.load() })
+        return queuedLoad
+      }
+      inFlightLoad = this.refresh().finally(() => { inFlightLoad = null })
+      return inFlightLoad
+    },
+    async refresh() {
       this.loading = true
       this.error = ''
       try {
         await seed()
         await seedUsages()
         await seedTaxonomy()
-        const [clothes, categories, usages, mainCategories, customColors] = await Promise.all([
-          db.clothing.toArray(), db.categories.orderBy('sortOrder').toArray(), db.usages.orderBy('sortOrder').toArray(), db.mainCategories.orderBy('sortOrder').toArray(), db.customColors.toArray(),
+        const [clothes, categories, usages, mainCategories, customColors, lastBackup] = await Promise.all([
+          db.clothing.toArray(), db.categories.orderBy('sortOrder').toArray(), db.usages.orderBy('sortOrder').toArray(), db.mainCategories.orderBy('sortOrder').toArray(), db.customColors.toArray(), db.settings.get('lastBackup'),
         ])
         this.clothes = clothes
         this.categories = categories
         this.usages = usages
         this.mainCategories = mainCategories
         this.customColors = customColors
+        this.lastBackup = lastBackup?.value || ''
         this.initialized = true
       } catch (error) {
         this.error = 'Your local wardrobe could not be opened. Check this browser’s storage permissions.'
         throw error
       } finally { this.loading = false }
     },
-    notify(message) {
+    notify(message, action = null) {
+      window.clearTimeout(toastTimer)
       this.toast = message
-      window.setTimeout(() => { if (this.toast === message) this.toast = '' }, 2800)
+      this.toastAction = action?.label || ''
+      toastHandler = action?.run || null
+      toastTimer = window.setTimeout(() => this.dismissToast(), action ? 5500 : 2800)
     },
-    async saveClothing(values, existingId = null) {
+    dismissToast() {
+      window.clearTimeout(toastTimer)
+      this.toast = ''
+      this.toastAction = ''
+      toastHandler = null
+    },
+    async runToastAction() {
+      const handler = toastHandler
+      this.dismissToast()
+      if (handler) await handler()
+    },
+    async saveClothing(values, existingId = null, { message = '' } = {}) {
       const now = new Date().toISOString()
       const existing = existingId ? await db.clothing.get(existingId) : null
       const record = {
@@ -51,10 +80,15 @@ export const useWardrobeStore = defineStore('wardrobe', {
       delete record.categoryIds
       await db.clothing.put(record)
       await this.load()
-      this.notify(existing ? 'Item updated' : 'Item added')
+      this.notify(message || (existing ? 'Item updated' : 'Item added'))
       return record
     },
-    async deleteClothing(id) { await db.clothing.delete(id); await this.load(); this.notify('Item deleted') },
+    async deleteClothing(id) {
+      const record = await db.clothing.get(id)
+      await db.clothing.delete(id)
+      await this.load()
+      this.notify(`Deleted “${record?.name || 'item'}”`, record && { label: 'Undo', run: async () => { await db.clothing.put(record); await this.load(); this.notify('Item restored') } })
+    },
     async setPreference(id, preference) {
       await db.clothing.update(id, { preference, updatedAt: new Date().toISOString() })
       await this.load()
@@ -84,9 +118,10 @@ export const useWardrobeStore = defineStore('wardrobe', {
     },
     async bulkDeleteClothing(ids) {
       if (!ids.length) return
+      const records = (await db.clothing.bulkGet(ids)).filter(Boolean)
       await db.clothing.bulkDelete(ids)
       await this.load()
-      this.notify(`${ids.length} item${ids.length === 1 ? '' : 's'} deleted`)
+      this.notify(`${ids.length} item${ids.length === 1 ? '' : 's'} deleted`, { label: 'Undo', run: async () => { await db.clothing.bulkPut(records); await this.load(); this.notify('Items restored') } })
     },
     async saveCategory(values, existingId = null) {
       const normalized = values.name.trim().toLocaleLowerCase()
@@ -115,6 +150,7 @@ export const useWardrobeStore = defineStore('wardrobe', {
       const now = new Date().toISOString(), existing = existingId ? await db.mainCategories.get(existingId) : null
       await db.mainCategories.put({ id: existing?.id || uid(), name, icon: values.icon || '◈', sortOrder: existing?.sortOrder ?? this.mainCategories.length, createdAt: existing?.createdAt || now, updatedAt: now })
       await this.load()
+      this.notify(existing ? 'Category updated' : 'Category added')
     },
     async deleteMainCategory(id, replacementId) {
       const children = this.categories.filter((entry) => entry.parentId === id)
@@ -130,16 +166,43 @@ export const useWardrobeStore = defineStore('wardrobe', {
       const existing = this.customColors.find((entry) => entry.name.toLowerCase() === name.trim().toLowerCase())
       await db.customColors.put({ id: existing?.id || uid(), name: name.trim(), value })
       await this.load()
+      this.notify('Colour saved')
     },
     async changeWear(id, totalDelta, sinceWashDelta) {
       await db.transaction('rw', db.clothing, async () => {
         const item = await db.clothing.get(id)
         if (!item) return
-        await db.clothing.update(id, { totalWears: Math.max(0, (item.totalWears || 0) + totalDelta), wearsSinceWash: Math.max(0, (item.wearsSinceWash || 0) + sinceWashDelta) })
+        const update = { totalWears: Math.max(0, (item.totalWears || 0) + totalDelta), wearsSinceWash: Math.max(0, (item.wearsSinceWash || 0) + sinceWashDelta) }
+        if (totalDelta > 0) update.lastWornAt = new Date().toISOString()
+        await db.clothing.update(id, update)
       })
       await this.load()
     },
-    async washItem(id) { await db.clothing.update(id, { wearsSinceWash: 0 }); await this.load() },
+    async logWear(id) {
+      // Read and write in one transaction so rapid taps queue up instead of overwriting each other.
+      let item, previous
+      await db.transaction('rw', db.clothing, async () => {
+        item = await db.clothing.get(id)
+        if (!item) return
+        previous = { totalWears: item.totalWears || 0, wearsSinceWash: item.wearsSinceWash || 0, lastWornAt: item.lastWornAt || '' }
+        await db.clothing.update(id, { totalWears: previous.totalWears + 1, wearsSinceWash: previous.wearsSinceWash + 1, lastWornAt: new Date().toISOString() })
+      })
+      if (!item) return
+      await this.load()
+      this.notify(`Worn: ${item.name}`, { label: 'Undo', run: async () => { await db.clothing.update(id, previous); await this.load() } })
+    },
+    async washItem(id) {
+      let item, previous
+      await db.transaction('rw', db.clothing, async () => {
+        item = await db.clothing.get(id)
+        if (!item) return
+        previous = item.wearsSinceWash || 0
+        await db.clothing.update(id, { wearsSinceWash: 0 })
+      })
+      if (!item) return
+      await this.load()
+      this.notify(`Washed: ${item.name}`, { label: 'Undo', run: async () => { await db.clothing.update(id, { wearsSinceWash: previous }); await this.load() } })
+    },
     async resetWearCount(id) { await db.clothing.update(id, { totalWears: 0, wearsSinceWash: 0 }); await this.load() },
     async saveUsage(values, existingId = null) {
       const normalized = values.name.trim().toLocaleLowerCase()
